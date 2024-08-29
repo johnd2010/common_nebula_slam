@@ -1,3 +1,5 @@
+#include "point_cloud_mapper/OctomapServer.h"
+#include "ros/console.h"
 #include <omp.h>
 #include <std_msgs/String.h>
 #include <pcl/search/impl/search.hpp>
@@ -62,6 +64,8 @@ bool PointCloudMultiThreadedMapper::LoadParameters(const ros::NodeHandle& n)
   map_octree_b_.reset(new Octree(octree_resolution_));
   map_octree_->setInputCloud(map_data_);
   initialized_ = true;
+  occupancy_map_server = new OctomapServer(n,fixed_frame_id_);
+  occupancy_map_server_b = new OctomapServer(n,fixed_frame_id_);
   return true;
 }
 
@@ -314,12 +318,30 @@ void PointCloudMultiThreadedMapper::PublishMapThread()
     std::lock_guard<std::mutex> lock(map_data_mutex_);
     map_pub_.publish(map_data_);
     map_updated_ = false;
+    if(map_octree_->getLeafCount())
+    {
+      if(!occupancy_map_server_init)
+        {
+          occupancy_map_server->Initialize(map_octree_);
+          occupancy_map_server_init = true;
+        }
+      occupancy_map_server->publishProjected2DMap(ros::Time::now());
+    }
   }
   else if (refresh_id == "b")
   {
     std::lock_guard<std::mutex> lock(map_data_b_mutex_);
     map_pub_.publish(map_data_b_);
     map_b_updated_ = false;
+    if(map_octree_b_->getLeafCount())
+    {
+      if(!occupancy_map_server_init_b)
+        {
+          occupancy_map_server_b->Initialize(map_octree_b_);
+          occupancy_map_server_init_b = true;
+        }
+      occupancy_map_server_b->publishProjected2DMap(ros::Time::now());
+    }
   }
 }
 

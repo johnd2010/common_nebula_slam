@@ -16,6 +16,8 @@
 #include <pcl/octree/octree_search.h>
 #include <geometry_utils/Transform3.h>
 #include <geometry_utils/GeometryUtilsROS.h>
+#include <point_cloud_mapper/OctomapServer.h>
+
 
 class PointCloudMultiThreadedMapper : public IPointCloudMapper
 {
@@ -81,6 +83,7 @@ private:
   bool map_updated_;
   bool map_b_updated_;
   bool b_publish_only_with_subscribers_;
+  bool occupancy_map_server_init=false, occupancy_map_server_init_b=false;
 
   // When a loop closure occurs, this flag enables a user to unsubscribe from
   // and resubscribe to the incremental map topic in order to re-draw the map.
@@ -134,4 +137,6 @@ private:
   bool b_inserted_points_;
   ros::Timer refresh_timer_;
   void RefreshTimerCallback(const ros::TimerEvent& ev);
+  OctomapServer* occupancy_map_server=nullptr;
+  OctomapServer* occupancy_map_server_b=nullptr;
 };

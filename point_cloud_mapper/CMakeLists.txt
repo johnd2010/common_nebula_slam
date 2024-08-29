@@ -72,6 +72,7 @@ add_library(${PROJECT_NAME} src/PointCloudMapper.cc
                             src/PointCloudMultiThreadedMapper.cc
                             src/SimplePointCloudMapper.cc
                             src/PointCloudIkdTreeMapper.cc
+                            src/OctomapServer.cpp
                             src/ikd_tree/ikd_Tree.cpp
                             )
 target_link_libraries(${PROJECT_NAME}
