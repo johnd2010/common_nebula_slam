@@ -5,3 +5,8 @@ map:
   volume_voxel_size: 1.024 #(0.001 * 2^10)
   default_map_buffer_max_size: 7 # Only for LO_frontend, if selected - approximately 1 m per cloud
 
+  occupancy_map_resolution: 0.1
+  occupancy_map_min_z: 0.5
+  occupancy_map_max_z: 50
+  
+

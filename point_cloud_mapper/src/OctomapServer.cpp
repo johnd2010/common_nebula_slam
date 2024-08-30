@@ -27,6 +27,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "ros/console.h"
 #include <point_cloud_mapper/OctomapServer.h>
 
 OctomapServer::OctomapServer( const ros::NodeHandle &nh_,std::string m_worldFrameId)
@@ -41,19 +42,17 @@ OctomapServer::OctomapServer( const ros::NodeHandle &nh_,std::string m_worldFram
   m_occupancyMaxZ(std::numeric_limits<double>::max()),
   m_incrementalUpdate(false)
 {
-  m_nh_private.param("occupancy_min_z", m_occupancyMinZ,m_occupancyMinZ);
-  m_nh_private.param("occupancy_max_z", m_occupancyMaxZ,m_occupancyMaxZ);
-  m_nh_private.param("resolution", m_res, m_res);
-  m_gridmap.info.resolution = m_res;
-  m_mapPub = m_nh.advertise<nav_msgs::OccupancyGrid>("projected_map", 5, true);
-
-
-  // initialize octomap object & params
-
+  
 }
 
 void OctomapServer::Initialize(Octree::Ptr octree)
 {
+  m_nh_private.param("map/occupancy_map_min_z", m_occupancyMinZ,m_occupancyMinZ);
+  m_nh_private.param("map/occupancy_map_max_z", m_occupancyMaxZ,m_occupancyMaxZ);
+  m_nh_private.param("map/occupancy_map_resolution", m_res, m_res);
+  m_mapPub = m_nh.advertise<nav_msgs::OccupancyGrid>("projected_map", 5, true);
+  m_gridmap.info.resolution = m_res;
+  ROS_INFO("Occupancy Map with Resolution %f and Z (MinZ,MaxZ) : (%f,%f)",m_res,m_occupancyMinZ,m_occupancyMaxZ);
   m_octree = octree;
   m_treeDepth = m_octree->getTreeDepth();
   m_maxTreeDepth = m_treeDepth;
@@ -76,6 +75,7 @@ void OctomapServer::handlePreNodeTraversal(){
 void OctomapServer::publishProjected2DMap(const ros::Time& rostime){
   ros::WallTime startTime = ros::WallTime::now();
   size_t octomapSize = m_octree->getLeafCount();
+  oldMapInfo = m_gridmap.info;
   
   
   // TODO: estimate num occ. voxels for size of arrays (reserve)
@@ -94,25 +94,19 @@ void OctomapServer::publishProjected2DMap(const ros::Time& rostime){
   m_octree->getOccupiedVoxelCenters(voxelCenters);  
   
   for (const auto& occupied_center : voxelCenters)
-    update2DMap(occupied_center, true);
+  {
+    if(occupied_center.z>=m_occupancyMinZ && occupied_center.z<=m_occupancyMaxZ)
+    {
+      update2DMap(occupied_center, true);
+    }
+  }
 
 
   double total_elapsed = (ros::WallTime::now() - startTime).toSec();
-  ROS_INFO("Min Occupied: %f %f %f / Max Occupied: %f %f %f", min_occupied.x, min_occupied.y, min_occupied.z, max_occupied.x, max_occupied.y, max_occupied.z);
-  ROS_INFO("Width: %u  Height: %u", m_gridmap.info.width, m_gridmap.info.height);
   m_gridmap.header.frame_id = m_worldFrameId;
   m_gridmap.header.stamp = rostime;
   m_mapPub.publish(m_gridmap);
   ROS_INFO("Map publishing in OctomapServer took %f sec", total_elapsed);
-}
-
-void OctomapServer::handlePostNodeTraversal(){                                                        
-    m_gridmap.info.width = static_cast<unsigned int>(std::abs((max_occupied.x - min_occupied.x))/m_res);
-    m_gridmap.info.height = static_cast<unsigned int>(std::abs((max_occupied.y - min_occupied.y))/m_res);
-    m_gridmap.info.resolution = m_res;
-    m_gridmap.info.origin.position.x = min_occupied.x;
-    m_gridmap.info.origin.position.y = min_occupied.y;
-    m_gridmap.data.resize(m_gridmap.info.width * m_gridmap.info.height, -1);
 }
 
 void OctomapServer::update2DMap(pcl::PointXYZINormal current_3dpoint, bool occupied){
@@ -128,6 +122,42 @@ void OctomapServer::update2DMap(pcl::PointXYZINormal current_3dpoint, bool occup
   {
     m_gridmap.data[idx] = 0;
   }
+}
+
+void OctomapServer::adjustMapData(nav_msgs::OccupancyGrid& map, const nav_msgs::MapMetaData& oldMapInfo) const{
+
+  int i_off = int((oldMapInfo.origin.position.x - map.info.origin.position.x)/map.info.resolution +0.5);
+  int j_off = int((oldMapInfo.origin.position.y - map.info.origin.position.y)/map.info.resolution +0.5);
+
+  if (i_off < 0 || j_off < 0
+      || oldMapInfo.width  + i_off > map.info.width
+      || oldMapInfo.height + j_off > map.info.height)
+  {
+    ROS_ERROR("New 2D map does not contain old map area, this case is not implemented");
+    return;
+  }
+
+  nav_msgs::OccupancyGrid::_data_type oldMapData = map.data;
+
+  map.data.clear();
+  // init to unknown:
+  map.data.resize(map.info.width * map.info.height, -1);
+
+  nav_msgs::OccupancyGrid::_data_type::iterator fromStart, fromEnd, toStart;
+
+  for (int j =0; j < int(oldMapInfo.height); ++j ){
+    // copy chunks, row by row:
+    fromStart = oldMapData.begin() + j*oldMapInfo.width;
+    fromEnd = fromStart + oldMapInfo.width;
+    toStart = map.data.begin() + ((j+j_off)*m_gridmap.info.width + i_off);
+    copy(fromStart, fromEnd, toStart);
+
+//    for (int i =0; i < int(oldMapInfo.width); ++i){
+//      map.data[m_gridmap.info.width*(j+j_off) +i+i_off] = oldMapData[oldMapInfo.width*j +i];
+//    }
+
+  }
+
 }
 
 void OctomapServer::getOccupiedLimits()
@@ -150,4 +180,16 @@ void OctomapServer::getOccupiedLimits()
     initial_check=false;
     }
   }
+}
+
+
+void OctomapServer::handlePostNodeTraversal(){                                                        
+    m_gridmap.info.width = static_cast<unsigned int>(std::abs((max_occupied.x - min_occupied.x))/m_res);
+    m_gridmap.info.height = static_cast<unsigned int>(std::abs((max_occupied.y - min_occupied.y))/m_res);
+    m_gridmap.info.resolution = m_res;
+    m_gridmap.info.origin.position.x = min_occupied.x;
+    m_gridmap.info.origin.position.y = min_occupied.y;
+    adjustMapData(m_gridmap, oldMapInfo);
+
+    // m_gridmap.data.resize(m_gridmap.info.width * m_gridmap.info.height, -1);
 }

@@ -141,6 +141,7 @@ pcl::PointXYZ genLeafNodeCenterFromOctreeKey(const pcl::octree::OctreeKey& key) 
     return center;
 }
 void update2DMap(pcl::PointXYZINormal current_3dpoint, bool occupied);
+void adjustMapData(nav_msgs::OccupancyGrid& map, const nav_msgs::MapMetaData& oldMapInfo) const;
 float getNodeSize() {
     // Get the depth of the end node
     float resolution = m_octree->getResolution();
@@ -191,9 +192,12 @@ float getNodeSize() {
   bool initial_check=true;  
 
   nav_msgs::OccupancyGrid m_gridmap;
+  nav_msgs::MapMetaData oldMapInfo;
   
   unsigned m_multires2DScale;
   bool m_projectCompleteMap;
 };
 
 #endif
+
+// When moving window is enabled, you should change the way adjustmap is handled
