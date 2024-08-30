@@ -150,19 +150,15 @@ float getNodeSize() {
 
   /// hook that is called before traversing all nodes
   void handlePreNodeTraversal();
-  void handlePostNodeTraversal(const ros::Time& rostime, pcl::PointXYZINormal minPt,pcl::PointXYZINormal maxPt);
+  void getOccupiedLimits();
+  void handlePostNodeTraversal();
+  void getAllVoxelCenters(std::vector<Eigen::Vector3f>& voxelCenters);
 
   /// updates the downprojected 2D map as either occupied or free
   // void update2DMap(const Octree::LeafNodeIterator& it, bool occupied);
 
   inline unsigned mapIdx(int i, int j) const {
     return m_gridmap.info.width * j + i;
-  }
-
-  inline unsigned mapIdx(const pcl::octree::OctreeKey& key) const {    
-    return mapIdx((key.x - m_paddedMinKey.x) / m_multires2DScale,
-                  (key.y - m_paddedMinKey.y) / m_multires2DScale);
-
   }
 
   ros::NodeHandle m_nh;
@@ -174,7 +170,9 @@ float getNodeSize() {
   pcl::octree::OctreeKey m_updateBBXMax;
   pcl::octree::OctreeKey m_paddedMinKey;
   pcl::octree::OctreeKey m_paddedMaxKey;
-  pcl::PointXYZINormal minPt,maxPt;
+  pcl::PointXYZINormal minPt,maxPt;  
+  pcl::PointXYZINormal min_occupied,max_occupied;
+  pcl::PointCloud<pcl::PointXYZINormal>::Ptr Cloud;
   
 
   std::string m_baseFrameId; // base of the robot for ground plane filtering
@@ -190,6 +188,8 @@ float getNodeSize() {
 
   // downprojected 2D map:
   bool m_incrementalUpdate;
+  bool initial_check=true;  
+
   nav_msgs::OccupancyGrid m_gridmap;
   
   unsigned m_multires2DScale;
