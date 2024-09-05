@@ -7,13 +7,18 @@ project(point_cloud_mapper)
 
 SET(CMAKE_BUILD_TYPE Release)
 
-find_package(PCL REQUIRED COMPONENTS common octree filters)
+find_package(PCL REQUIRED COMPONENTS common octree filters surface)
+find_package( OpenCV REQUIRED )
 if(NOT PCL_FOUND)
   message(FATAL_ERROR "This program requires the PCL library.")
 endif(NOT PCL_FOUND)
 
 include_directories(${PCL_INCLUDE_DIRS})
+include_directories(${OpenCV_INCLUDE_DIRS})
+
 link_directories(${PCL_LIBRARY_DIRS})
+link_directories(${OpenCV_LIBS})
+
 add_definitions(${PCL_DEFINITIONS})
 
 find_package(OpenMP)
@@ -31,7 +36,7 @@ find_package(catkin REQUIRED COMPONENTS
   parameter_utils
   geometry_utils
   frontend_utils
-  #utils
+  cv_bridge
 )
 
 catkin_package(
@@ -43,7 +48,7 @@ catkin_package(
     parameter_utils
     geometry_utils
     frontend_utils
-    #utils
+    cv_bridge
 )
 
 #include(CheckCXXCompilerFlag)
@@ -61,10 +66,12 @@ include_directories(
   include
   ${catkin_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
 )
 
 link_directories(
   ${catkin_LIBRARY_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
   ${PCL_LIBRARY_DIRS}
 )
 
@@ -78,6 +85,7 @@ add_library(${PROJECT_NAME} src/PointCloudMapper.cc
 target_link_libraries(${PROJECT_NAME}
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
+  ${OpenCV_INCLUDE_DIRS}
   OpenMP::OpenMP_CXX
 )
 
@@ -86,6 +94,7 @@ target_link_libraries(${PROJECT_NAME}_node
   ${PROJECT_NAME}
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
+  ${OpenCV_INCLUDE_DIRS}
 )
 
 # Add Gtest for the package

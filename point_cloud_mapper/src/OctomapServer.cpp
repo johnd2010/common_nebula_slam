@@ -27,6 +27,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+
+#include "pcl/common/centroid.h"
 #include "ros/console.h"
 #include <point_cloud_mapper/OctomapServer.h>
 
@@ -56,21 +58,9 @@ void OctomapServer::Initialize(Octree::Ptr octree)
   m_octree = octree;
   m_treeDepth = m_octree->getTreeDepth();
   m_maxTreeDepth = m_treeDepth;
+
 }
 
-void OctomapServer::handlePreNodeTraversal(){                                                        
-    // TODO: move most of this stuff into c'tor and init map only once (adjust if size changes)
-    double minX, minY, minZ, maxX, maxY, maxZ;
-    m_octree->getBoundingBox(minX, minY, minZ, maxX, maxY, maxZ);
-    minPt = pcl::PointXYZINormal({static_cast<float>(minX), static_cast<float>(minY), static_cast<float>(minZ), 0.5f, 0.0f, 1.0f, 0.0f, 0.1f});
-    maxPt = pcl::PointXYZINormal({static_cast<float>(maxX), static_cast<float>(maxY), static_cast<float>(maxZ), 0.5f, 0.0f, 1.0f, 0.0f, 0.1f});
-    m_gridmap.info.width = static_cast<unsigned int>(std::abs(m_res*(maxPt.x - minPt.x)));
-    m_gridmap.info.height = static_cast<unsigned int>(std::abs(m_res*(maxPt.y - minPt.y)));
-    m_gridmap.info.resolution = m_res;
-    m_gridmap.info.origin.position.x = minPt.x;
-    m_gridmap.info.origin.position.y = minPt.y;
-    m_gridmap.data.resize(m_gridmap.info.width * m_gridmap.info.height, -1);
-}
 
 void OctomapServer::publishProjected2DMap(const ros::Time& rostime){
   ros::WallTime startTime = ros::WallTime::now();
@@ -84,23 +74,11 @@ void OctomapServer::publishProjected2DMap(const ros::Time& rostime){
     return;
   }
   // call pre-traversal hook:
-  // handlePreNodeTraversal();
 
   // now, traverse all occupied voxels in the tree:
-  getOccupiedLimits();
-
-  handlePostNodeTraversal();
-  std::vector<pcl::PointXYZINormal, Eigen::aligned_allocator<pcl::PointXYZINormal>> voxelCenters;
-  m_octree->getOccupiedVoxelCenters(voxelCenters);  
   
-  for (const auto& occupied_center : voxelCenters)
-  {
-    if(occupied_center.z>=m_occupancyMinZ && occupied_center.z<=m_occupancyMaxZ)
-    {
-      update2DMap(occupied_center, true);
-    }
-  }
-
+  m_octree->getOccupiedVoxelCenters(voxelCenters);  
+  getOccupiedLimits();
 
   double total_elapsed = (ros::WallTime::now() - startTime).toSec();
   m_gridmap.header.frame_id = m_worldFrameId;
@@ -146,50 +124,74 @@ void OctomapServer::adjustMapData(nav_msgs::OccupancyGrid& map, const nav_msgs::
   nav_msgs::OccupancyGrid::_data_type::iterator fromStart, fromEnd, toStart;
 
   for (int j =0; j < int(oldMapInfo.height); ++j ){
-    // copy chunks, row by row:
     fromStart = oldMapData.begin() + j*oldMapInfo.width;
     fromEnd = fromStart + oldMapInfo.width;
     toStart = map.data.begin() + ((j+j_off)*m_gridmap.info.width + i_off);
     copy(fromStart, fromEnd, toStart);
-
-//    for (int i =0; i < int(oldMapInfo.width); ++i){
-//      map.data[m_gridmap.info.width*(j+j_off) +i+i_off] = oldMapData[oldMapInfo.width*j +i];
-//    }
-
   }
 
 }
 
 void OctomapServer::getOccupiedLimits()
 {
-  std::vector<pcl::PointXYZINormal, Eigen::aligned_allocator<pcl::PointXYZINormal>> voxelCenters;
-  m_octree->getOccupiedVoxelCenters(voxelCenters);  
+  initial_check = true;
+  filteredVoxelCloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>);
+  convexCloud = pcl::PointCloud<pcl::PointXYZ>::Ptr(new pcl::PointCloud<pcl::PointXYZ>);
   for (const auto& occupied_center : voxelCenters) {
-    if(!initial_check)
-    {
-    min_occupied.x = std::min(occupied_center.x, min_occupied.x);
-    min_occupied.y = std::min(occupied_center.y, min_occupied.y);
-    min_occupied.z = std::min(occupied_center.z, min_occupied.z);
-    max_occupied.x = std::max(occupied_center.x, max_occupied.x);
-    max_occupied.y = std::max(occupied_center.y, max_occupied.y);
-    max_occupied.z = std::max(occupied_center.z, max_occupied.z);
-    }
-    else {
-    min_occupied = occupied_center;
-    max_occupied = occupied_center;
-    initial_check=false;
+      voxelpoints.x = occupied_center.x;
+      voxelpoints.y = occupied_center.y;
+      voxelpoints.z = 0;
+      filteredVoxelCloud->points.push_back(voxelpoints);
+      if(!initial_check){
+
+        min_occupied.x = std::min(occupied_center.x, min_occupied.x);
+        min_occupied.y = std::min(occupied_center.y, min_occupied.y);
+        min_occupied.z = std::min(occupied_center.z, min_occupied.z);
+        max_occupied.x = std::max(occupied_center.x, max_occupied.x);
+        max_occupied.y = std::max(occupied_center.y, max_occupied.y);
+        max_occupied.z = std::max(occupied_center.z, max_occupied.z);
+      }
+      else {
+        min_occupied = occupied_center;
+        max_occupied = occupied_center;
+        initial_check=false;
     }
   }
+  chull.setInputCloud(filteredVoxelCloud);
+  chull.setAlpha (0.1);
+  chull.reconstruct(*convexCloud);
+  initializeOccupancyMap();
 }
 
 
-void OctomapServer::handlePostNodeTraversal(){                                                        
+void OctomapServer::initializeOccupancyMap(){                                                        
     m_gridmap.info.width = static_cast<unsigned int>(std::abs((max_occupied.x - min_occupied.x))/m_res);
     m_gridmap.info.height = static_cast<unsigned int>(std::abs((max_occupied.y - min_occupied.y))/m_res);
     m_gridmap.info.resolution = m_res;
     m_gridmap.info.origin.position.x = min_occupied.x;
     m_gridmap.info.origin.position.y = min_occupied.y;
-    adjustMapData(m_gridmap, oldMapInfo);
+    cv::Mat binary_occupancy_map(m_gridmap.info.height,m_gridmap.info.width,CV_8SC1, cv::Scalar(-1));
+    std::vector<cv::Point> polygonVertices;
+    cv::Point occ_point,occ_centroid;
+    Eigen::Vector4f centroid;
+    pcl::compute3DCentroid(*convexCloud,centroid);
+    occ_centroid.x = static_cast<unsigned int>(std::abs((centroid[0] - min_occupied.x))/m_res);
+    occ_centroid.y = static_cast<unsigned int>(std::abs((centroid[1] - min_occupied.y))/m_res);
+    for (const auto& concavelimits : *convexCloud) {
+      occ_point.x = static_cast<unsigned int>(std::abs((concavelimits.x - min_occupied.x))/m_res);
+      occ_point.y = static_cast<unsigned int>(std::abs((concavelimits.y - min_occupied.y))/m_res);
+      // polygonVertices.push_back(occ_point);
+      insertPointClockwise(polygonVertices, occ_centroid, occ_point);
+    }
+    
+    for (const auto& occupied_center : voxelCenters){      
+      uchar* ptr = binary_occupancy_map.ptr<uchar>(static_cast<unsigned int>(std::abs((occupied_center.y - min_occupied.y))/m_res));
+      ptr[static_cast<unsigned int>(std::abs((occupied_center.x - min_occupied.x))/m_res)] = 100;
+    }
 
-    // m_gridmap.data.resize(m_gridmap.info.width * m_gridmap.info.height, -1);
+    std::vector<std::vector<cv::Point>> polygons;
+    polygons.push_back(polygonVertices);
+    cv::fillPoly(binary_occupancy_map, polygons, cv::Scalar(0));
+    std::vector<int8_t> occupancyGridData(binary_occupancy_map.begin<uchar>(), binary_occupancy_map.end<uchar>());
+    m_gridmap.data = occupancyGridData;
 }

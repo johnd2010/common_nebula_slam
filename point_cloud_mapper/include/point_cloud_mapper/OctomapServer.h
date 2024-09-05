@@ -35,28 +35,36 @@
 #include <nav_msgs/OccupancyGrid.h>
 #include <frontend_utils/CommonStructs.h>
 
-// #include <moveit_msgs/CollisionObject.h>
-// #include <moveit_msgs/CollisionMap.h>
 #include <std_srvs/Empty.h>
-#include <dynamic_reconfigure/server.h>
-#include <octomap_server/OctomapServerConfig.h>
-
 #include <pcl/point_types.h>
 #include <pcl/conversions.h>
 #include <pcl_ros/transforms.h>
 #include <pcl/sample_consensus/method_types.h>
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"  // pcl::SAC_SAMPLE_SIZE is protected since PCL 1.8.0
-#include <pcl/sample_consensus/model_types.h>
-#pragma GCC diagnostic pop
-
-#include <pcl/segmentation/sac_segmentation.h>
-#include <pcl/io/pcd_io.h>
 #include <pcl/filters/extract_indices.h>
 #include <pcl/filters/passthrough.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/octree/octree_search.h>
+#include <pcl/surface/concave_hull.h>
+#include <opencv2/opencv.hpp>
+
+#include <pcl/ModelCoefficients.h>
+#include <pcl/io/pcd_io.h>
+#include <pcl/point_types.h>
+#include <pcl/sample_consensus/method_types.h>
+#include <pcl/sample_consensus/model_types.h>
+#include <pcl/filters/passthrough.h>
+#include <pcl/filters/project_inliers.h>
+#include <pcl/segmentation/sac_segmentation.h>
+#include <pcl/surface/concave_hull.h>
+
+#include <vector>
+#include "opencv2/core.hpp"
+#include "opencv2/core/hal/interface.h"
+#include "opencv2/core/mat.hpp"
+#include "opencv2/core/types.hpp"
+#include "opencv2/imgproc.hpp"
+
 
 
 class OctomapServer {
@@ -78,68 +86,6 @@ public:
 
 protected:
   std::string m_worldFrameId;
-  pcl::octree::OctreeKey genOctreeKeyforPoint(const PointF& point) {
-    pcl::octree::OctreeKey key;
-    float resolution = m_octree->getResolution();
-
-    // Compute the key for each coordinate
-    key.x = static_cast<unsigned int>(std::floor(point.x / resolution));
-    key.y = static_cast<unsigned int>(std::floor(point.y / resolution));
-    key.z = static_cast<unsigned int>(std::floor(point.z / resolution));
-
-    return key;
-}
-
-
-pcl::PointXYZ octreeKeyToPoint(const pcl::octree::OctreeKey& key, float resolution) {
-    // Calculate the 3D coordinates
-    float x = key.x * resolution + resolution / 2.0f;
-    float y = key.y * resolution + resolution / 2.0f;
-    float z = key.z * resolution + resolution / 2.0f;
-
-    // Return the 3D point
-    return pcl::PointXYZ(x, y, z);
-}
-
-  
-  bool coordToKeyChecked(const pcl::PointXYZINormal& point, pcl::octree::OctreeKey& key) {
-    // Get the bounding box of the octree
-    double minX, minY, minZ, maxX, maxY, maxZ;
-    m_octree->getBoundingBox(minX, minY, minZ, maxX, maxY, maxZ);
-
-    // Check if the point is within the bounds of the octree
-    if (point.x < minX || point.x > maxX ||
-        point.y < minY || point.y > maxY ||
-        point.z < minZ || point.z > maxZ) {
-        std::cerr << "Point is out of bounds!" << std::endl;
-        return false;
-    }
-
-    // Get the maximum depth of the octree
-    unsigned int max_depth = m_octree->getTreeDepth();
-
-    // Convert the coordinate to a key considering the maximum depth
-    key = genOctreeKeyforPoint(point);
-
-    // Ensure the key respects the maximum depth
-    if (key.x >= (1 << max_depth) || key.y >= (1 << max_depth) || key.z >= (1 << max_depth)) {
-        std::cerr << "Generated key exceeds maximum depth!" << std::endl;
-        return false;
-    }
-
-    return true;
-}
-pcl::PointXYZ genLeafNodeCenterFromOctreeKey(const pcl::octree::OctreeKey& key) {
-    pcl::PointXYZ center;
-    float resolution = m_octree->getResolution();
-
-    // Compute the center coordinates for each key
-    center.x = (key.x + 0.5f) * resolution;
-    center.y = (key.y + 0.5f) * resolution;
-    center.z = (key.z + 0.5f) * resolution;
-
-    return center;
-}
 void update2DMap(pcl::PointXYZINormal current_3dpoint, bool occupied);
 void adjustMapData(nav_msgs::OccupancyGrid& map, const nav_msgs::MapMetaData& oldMapInfo) const;
 float getNodeSize() {
@@ -148,11 +94,29 @@ float getNodeSize() {
     float nodeSize = resolution * std::pow(2.0f, static_cast<float>(m_maxTreeDepth));
     return nodeSize;
 }
-
+double calculateAngle(const cv::Point& centroid, const cv::Point& p) {
+    return atan2(p.y - centroid.y, p.x - centroid.x);
+}
+bool comparePoints(const cv::Point& centroid, const cv::Point& a, const cv::Point& b) {
+    double angleA = calculateAngle(centroid, a);
+    double angleB = calculateAngle(centroid, b);
+    return angleA > angleB; // For clockwise order
+}
+void sortPointsClockwise(std::vector<cv::Point>& points, const cv::Point& centroid) {
+    std::sort(points.begin(), points.end(), [&centroid, this](const cv::Point& a, const cv::Point& b) {
+        return comparePoints(centroid, a, b);
+    });
+}
+void insertPointClockwise(std::vector<cv::Point>& points, const cv::Point& centroid, const cv::Point& newPoint) {
+    auto it = std::lower_bound(points.begin(), points.end(), newPoint, [&centroid, this](const cv::Point& a, const cv::Point& b) {
+        return comparePoints(centroid, a, b);
+    });
+    points.insert(it, newPoint);
+}
   /// hook that is called before traversing all nodes
   void handlePreNodeTraversal();
   void getOccupiedLimits();
-  void handlePostNodeTraversal();
+  void initializeOccupancyMap();
   void getAllVoxelCenters(std::vector<Eigen::Vector3f>& voxelCenters);
 
   /// updates the downprojected 2D map as either occupied or free
@@ -174,6 +138,12 @@ float getNodeSize() {
   pcl::PointXYZINormal minPt,maxPt;  
   pcl::PointXYZINormal min_occupied,max_occupied;
   pcl::PointCloud<pcl::PointXYZINormal>::Ptr Cloud;
+  std::vector<pcl::PointXYZINormal, Eigen::aligned_allocator<pcl::PointXYZINormal>> voxelCenters;
+
+  pcl::PointCloud<pcl::PointXYZ>::Ptr filteredVoxelCloud,convexCloud;
+  pcl::PointXYZ voxelpoints;
+  pcl::ConcaveHull<pcl::PointXYZ> chull;
+  
   
 
   std::string m_baseFrameId; // base of the robot for ground plane filtering
