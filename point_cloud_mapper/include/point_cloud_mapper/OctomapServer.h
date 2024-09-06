@@ -57,13 +57,11 @@
 #include <pcl/filters/project_inliers.h>
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/surface/concave_hull.h>
+#include <pcl/filters/passthrough.h>
+#include <pcl/filters/voxel_grid.h>
 
 #include <vector>
-#include "opencv2/core.hpp"
-#include "opencv2/core/hal/interface.h"
-#include "opencv2/core/mat.hpp"
-#include "opencv2/core/types.hpp"
-#include "opencv2/imgproc.hpp"
+#include "pcl/impl/point_types.hpp"
 
 
 
@@ -94,21 +92,21 @@ float getNodeSize() {
     float nodeSize = resolution * std::pow(2.0f, static_cast<float>(m_maxTreeDepth));
     return nodeSize;
 }
-double calculateAngle(const cv::Point& centroid, const cv::Point& p) {
-    return atan2(p.y - centroid.y, p.x - centroid.x);
+double calculateAngle(const Eigen::Vector4f centroid, const pcl::PointXYZINormal p) {
+    return atan2(p.y - centroid[1], p.x - centroid[0]);
 }
-bool comparePoints(const cv::Point& centroid, const cv::Point& a, const cv::Point& b) {
+bool comparePoints(const Eigen::Vector4f  centroid, const pcl::PointXYZINormal a, const pcl::PointXYZINormal b) {
     double angleA = calculateAngle(centroid, a);
     double angleB = calculateAngle(centroid, b);
     return angleA > angleB; // For clockwise order
 }
-void sortPointsClockwise(std::vector<cv::Point>& points, const cv::Point& centroid) {
-    std::sort(points.begin(), points.end(), [&centroid, this](const cv::Point& a, const cv::Point& b) {
+void sortPointsClockwise(std::vector<pcl::PointXYZINormal>& points, Eigen::Vector4f centroid) {
+    std::sort(points.begin(), points.end(), [&centroid, this](const pcl::PointXYZINormal a, const pcl::PointXYZINormal b) {
         return comparePoints(centroid, a, b);
     });
 }
-void insertPointClockwise(std::vector<cv::Point>& points, const cv::Point& centroid, const cv::Point& newPoint) {
-    auto it = std::lower_bound(points.begin(), points.end(), newPoint, [&centroid, this](const cv::Point& a, const cv::Point& b) {
+void insertPointClockwise(std::vector<pcl::PointXYZINormal>& points, Eigen::Vector4f  centroid, const pcl::PointXYZINormal newPoint) {
+    auto it = std::lower_bound(points.begin(), points.end(), newPoint, [&centroid, this](const pcl::PointXYZINormal a, const pcl::PointXYZINormal b) {
         return comparePoints(centroid, a, b);
     });
     points.insert(it, newPoint);
@@ -140,9 +138,12 @@ void insertPointClockwise(std::vector<cv::Point>& points, const cv::Point& centr
   pcl::PointCloud<pcl::PointXYZINormal>::Ptr Cloud;
   std::vector<pcl::PointXYZINormal, Eigen::aligned_allocator<pcl::PointXYZINormal>> voxelCenters;
 
-  pcl::PointCloud<pcl::PointXYZ>::Ptr filteredVoxelCloud,convexCloud;
+  pcl::PointCloud<pcl::PointXYZINormal>::Ptr filteredVoxelCloud,convexCloud,downsampledCloud;
   pcl::PointXYZ voxelpoints;
-  pcl::ConcaveHull<pcl::PointXYZ> chull;
+  pcl::ConcaveHull<pcl::PointXYZINormal> chull;
+  pcl::VoxelGrid<pcl::PointXYZINormal> sor;
+  pcl::PassThrough<pcl::PointXYZINormal> pass;
+
   
   
 
@@ -166,6 +167,7 @@ void insertPointClockwise(std::vector<cv::Point>& points, const cv::Point& centr
   
   unsigned m_multires2DScale;
   bool m_projectCompleteMap;
+  
 };
 
 #endif
