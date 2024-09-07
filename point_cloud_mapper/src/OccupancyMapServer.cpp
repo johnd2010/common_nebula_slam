@@ -29,42 +29,37 @@
 
 
 #include "opencv2/core/types.hpp"
-#include <point_cloud_mapper/OctomapServer.h>
+#include <point_cloud_mapper/OccupancyMapServer.h>
 
-OctomapServer::OctomapServer( const ros::NodeHandle &nh_,std::string m_worldFrameId)
-: m_nh(nh_),
-  m_nh_private(nh_),
+OccupancyMapServer::OccupancyMapServer( const ros::NodeHandle &nh_,std::string m_worldFrameId)
+: nodehandle(nh_),
+  nodehandle_private(nh_),
   m_octree(NULL),
   m_res(0.5),
   m_worldFrameId(m_worldFrameId),
-  m_treeDepth(0),
-  m_maxTreeDepth(0),
   m_occupancyMinZ(-std::numeric_limits<double>::max()),
-  m_occupancyMaxZ(std::numeric_limits<double>::max()),
-  m_incrementalUpdate(false)
+  m_occupancyMaxZ(std::numeric_limits<double>::max())
 {
   
 }
 
-void OctomapServer::Initialize(Octree::Ptr octree)
+void OccupancyMapServer::Initialize(Octree::Ptr octree)
 {
-  m_nh_private.param("map/occupancy_map_min_z", m_occupancyMinZ,m_occupancyMinZ);
-  m_nh_private.param("map/occupancy_map_max_z", m_occupancyMaxZ,m_occupancyMaxZ);
-  m_nh_private.param("map/occupancy_map_resolution", m_res, m_res);
-  m_mapPub = m_nh.advertise<nav_msgs::OccupancyGrid>("projected_map", 5, true);
-  m_gridmap.info.resolution = m_res;
+  nodehandle_private.param("map/occupancy_map_min_z", m_occupancyMinZ,m_occupancyMinZ);
+  nodehandle_private.param("map/occupancy_map_max_z", m_occupancyMaxZ,m_occupancyMaxZ);
+  nodehandle_private.param("map/occupancy_map_resolution", m_res, m_res);
+  m_mapPub = nodehandle.advertise<nav_msgs::OccupancyGrid>("projected_map", 5, true);
+  occupancy_map.info.resolution = m_res;
   ROS_INFO("Occupancy Map with Resolution %f and Z (MinZ,MaxZ) : (%f,%f)",m_res,m_occupancyMinZ,m_occupancyMaxZ);
   m_octree = octree;
-  m_treeDepth = m_octree->getTreeDepth();
-  m_maxTreeDepth = m_treeDepth;
 
 }
 
 
-void OctomapServer::publishProjected2DMap(const ros::Time& rostime){
+void OccupancyMapServer::publishProjected2DMap(const ros::Time& rostime){
   ros::WallTime startTime = ros::WallTime::now();
   size_t octomapSize = m_octree->getLeafCount();
-  oldMapInfo = m_gridmap.info;
+  oldMapInfo = occupancy_map.info;
   
   
   // TODO: estimate num occ. voxels for size of arrays (reserve)
@@ -76,32 +71,16 @@ void OctomapServer::publishProjected2DMap(const ros::Time& rostime){
 
   // now, traverse all occupied voxels in the tree:
   
-  m_octree->getOccupiedVoxelCenters(voxelCenters);  
   getOccupiedLimits();
 
   double total_elapsed = (ros::WallTime::now() - startTime).toSec();
-  m_gridmap.header.frame_id = m_worldFrameId;
-  m_gridmap.header.stamp = rostime;
-  m_mapPub.publish(m_gridmap);
-  ROS_INFO("Map publishing in OctomapServer took %f sec", total_elapsed);
+  occupancy_map.header.frame_id = m_worldFrameId;
+  occupancy_map.header.stamp = rostime;
+  m_mapPub.publish(occupancy_map);
+  ROS_INFO("Map publishing in OccupancyMapServer took %f sec", total_elapsed);
 }
 
-void OctomapServer::update2DMap(pcl::PointXYZINormal current_3dpoint, bool occupied){
-  // update 2D map (occupied always overrides):
-  int i =  static_cast<unsigned int>(std::abs((current_3dpoint.x - m_gridmap.info.origin.position.x)/m_res));
-  int j =  static_cast<unsigned int>(std::abs((current_3dpoint.y - m_gridmap.info.origin.position.y)/m_res));
-  unsigned idx = mapIdx(i, j);
-  if (occupied)
-  {
-    m_gridmap.data[idx] = 100;
-  }
-  else
-  {
-    m_gridmap.data[idx] = 0;
-  }
-}
-
-void OctomapServer::adjustMapData(nav_msgs::OccupancyGrid& map, const nav_msgs::MapMetaData& oldMapInfo) const{
+void OccupancyMapServer::adjustMapData(nav_msgs::OccupancyGrid& map, const nav_msgs::MapMetaData& oldMapInfo) const{
 
   int i_off = int((oldMapInfo.origin.position.x - map.info.origin.position.x)/map.info.resolution +0.5);
   int j_off = int((oldMapInfo.origin.position.y - map.info.origin.position.y)/map.info.resolution +0.5);
@@ -125,18 +104,17 @@ void OctomapServer::adjustMapData(nav_msgs::OccupancyGrid& map, const nav_msgs::
   for (int j =0; j < int(oldMapInfo.height); ++j ){
     fromStart = oldMapData.begin() + j*oldMapInfo.width;
     fromEnd = fromStart + oldMapInfo.width;
-    toStart = map.data.begin() + ((j+j_off)*m_gridmap.info.width + i_off);
+    toStart = map.data.begin() + ((j+j_off)*occupancy_map.info.width + i_off);
     copy(fromStart, fromEnd, toStart);
   }
 
 }
 
-void OctomapServer::getOccupiedLimits()
+void OccupancyMapServer::getOccupiedLimits()
 {
-  initial_check = true;
-  filteredVoxelCloud = pcl::PointCloud<pcl::PointXYZINormal>::Ptr(new pcl::PointCloud<pcl::PointXYZINormal>);
-  convexCloud = pcl::PointCloud<pcl::PointXYZINormal>::Ptr(new pcl::PointCloud<pcl::PointXYZINormal>);
-  downsampledCloud = pcl::PointCloud<pcl::PointXYZINormal>::Ptr(new pcl::PointCloud<pcl::PointXYZINormal>);
+  filteredVoxelCloud = pcl::PointCloud<PointF>::Ptr(new pcl::PointCloud<PointF>);
+  convexCloud = pcl::PointCloud<PointF>::Ptr(new pcl::PointCloud<PointF>);
+  downsampledCloud = pcl::PointCloud<PointF>::Ptr(new pcl::PointCloud<PointF>);
   //downsample pointcloud
   sor.setInputCloud(m_octree->getInputCloud());
   sor.setLeafSize(m_res,m_res,m_res);
@@ -155,9 +133,9 @@ void OctomapServer::getOccupiedLimits()
 }
 
 
-void OctomapServer::initializeOccupancyMap(){     
+void OccupancyMapServer::initializeOccupancyMap(){     
   
-    std::vector<pcl::PointXYZINormal> polygonVertices;
+    std::vector<PointF> polygonVertices;
     cv::Point occ_point,occ_centroid;
     Eigen::Vector4f centroid;
     initial_check=true;
@@ -178,12 +156,12 @@ void OctomapServer::initializeOccupancyMap(){
         initial_check=false;
       }
     }
-    m_gridmap.info.width = static_cast<unsigned int>(std::abs((max_occupied.x - min_occupied.x))/m_res);
-    m_gridmap.info.height = static_cast<unsigned int>(std::abs((max_occupied.y - min_occupied.y))/m_res);
-    m_gridmap.info.resolution = m_res;
-    m_gridmap.info.origin.position.x = min_occupied.x;
-    m_gridmap.info.origin.position.y = min_occupied.y;
-    cv::Mat binary_occupancy_map(m_gridmap.info.height,m_gridmap.info.width,CV_8SC1, cv::Scalar(-1));
+    occupancy_map.info.width = static_cast<unsigned int>(std::abs((max_occupied.x - min_occupied.x))/m_res);
+    occupancy_map.info.height = static_cast<unsigned int>(std::abs((max_occupied.y - min_occupied.y))/m_res);
+    occupancy_map.info.resolution = m_res;
+    occupancy_map.info.origin.position.x = min_occupied.x;
+    occupancy_map.info.origin.position.y = min_occupied.y;
+    cv::Mat binary_occupancy_map(occupancy_map.info.height,occupancy_map.info.width,CV_8SC1, cv::Scalar(-1));
 
     for (const auto& occupied_center : *filteredVoxelCloud){      
       uchar* ptr = binary_occupancy_map.ptr<uchar>(static_cast<unsigned int>(std::abs((occupied_center.y - min_occupied.y))/m_res));
@@ -197,8 +175,7 @@ void OctomapServer::initializeOccupancyMap(){
     }
     polygons.push_back(concave_occupancy);
 
-    ROS_INFO("before fillpoly");
     cv::fillPoly(binary_occupancy_map, polygons, cv::Scalar(0));
     std::vector<int8_t> occupancyGridData(binary_occupancy_map.begin<uchar>(), binary_occupancy_map.end<uchar>());
-    m_gridmap.data = occupancyGridData;
+    occupancy_map.data = occupancyGridData;
 }

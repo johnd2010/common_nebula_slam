@@ -27,8 +27,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef OCTOMAP_SERVER_OCTOMAPSERVER_H
-#define OCTOMAP_SERVER_OCTOMAPSERVER_H
+#ifndef OCTOMAP_SERVER_OccupancyMapServer_H
+#define OCTOMAP_SERVER_OccupancyMapServer_H
 
 #include <ros/ros.h>
 #include <visualization_msgs/MarkerArray.h>
@@ -47,7 +47,7 @@
 #include <pcl/octree/octree_search.h>
 #include <pcl/surface/concave_hull.h>
 #include <opencv2/opencv.hpp>
-
+#include <frontend_utils/CommonStructs.h>
 #include <pcl/ModelCoefficients.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/point_types.h>
@@ -65,18 +65,13 @@
 
 
 
-class OctomapServer {
+class OccupancyMapServer {
 
 public:
   // typedef octomap::OcTree OcTreeT;
   typedef pcl::octree::OctreePointCloudSearch<PointF> Octree;
 
-  OctomapServer(const ros::NodeHandle &nh_ = ros::NodeHandle(),std::string m_worldFrameId="map");
-
-  void assign_current_tree(Octree::Ptr locus_octree)
-  {
-    m_octree = locus_octree;
-  }
+  OccupancyMapServer(const ros::NodeHandle &nh_ = ros::NodeHandle(),std::string m_worldFrameId="map");
 
   void Initialize(Octree::Ptr octree);
   void reset(const ros::NodeHandle &n,std::string frame);
@@ -84,85 +79,58 @@ public:
 
 protected:
   std::string m_worldFrameId;
-void update2DMap(pcl::PointXYZINormal current_3dpoint, bool occupied);
-void adjustMapData(nav_msgs::OccupancyGrid& map, const nav_msgs::MapMetaData& oldMapInfo) const;
-float getNodeSize() {
-    // Get the depth of the end node
-    float resolution = m_octree->getResolution();
-    float nodeSize = resolution * std::pow(2.0f, static_cast<float>(m_maxTreeDepth));
-    return nodeSize;
-}
-double calculateAngle(const Eigen::Vector4f centroid, const pcl::PointXYZINormal p) {
-    return atan2(p.y - centroid[1], p.x - centroid[0]);
-}
-bool comparePoints(const Eigen::Vector4f  centroid, const pcl::PointXYZINormal a, const pcl::PointXYZINormal b) {
-    double angleA = calculateAngle(centroid, a);
-    double angleB = calculateAngle(centroid, b);
-    return angleA > angleB; // For clockwise order
-}
-void sortPointsClockwise(std::vector<pcl::PointXYZINormal>& points, Eigen::Vector4f centroid) {
-    std::sort(points.begin(), points.end(), [&centroid, this](const pcl::PointXYZINormal a, const pcl::PointXYZINormal b) {
-        return comparePoints(centroid, a, b);
-    });
-}
-void insertPointClockwise(std::vector<pcl::PointXYZINormal>& points, Eigen::Vector4f  centroid, const pcl::PointXYZINormal newPoint) {
-    auto it = std::lower_bound(points.begin(), points.end(), newPoint, [&centroid, this](const pcl::PointXYZINormal a, const pcl::PointXYZINormal b) {
-        return comparePoints(centroid, a, b);
-    });
-    points.insert(it, newPoint);
-}
-  /// hook that is called before traversing all nodes
-  void handlePreNodeTraversal();
+  void update2DMap(PointF current_3dpoint, bool occupied);
+  void adjustMapData(nav_msgs::OccupancyGrid& map, const nav_msgs::MapMetaData& oldMapInfo) const;
+  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  // Inserting points in a clockwise rotaion for computation of concave points
+  double calculateAngle(const Eigen::Vector4f centroid, const PointF p) {
+      return atan2(p.y - centroid[1], p.x - centroid[0]);
+  }
+  bool comparePoints(const Eigen::Vector4f  centroid, const PointF a, const PointF b) {
+      double angleA = calculateAngle(centroid, a);
+      double angleB = calculateAngle(centroid, b);
+      return angleA > angleB; // For clockwise order
+  }
+  void sortPointsClockwise(std::vector<PointF>& points, Eigen::Vector4f centroid) {
+      std::sort(points.begin(), points.end(), [&centroid, this](const PointF a, const PointF b) {
+          return comparePoints(centroid, a, b);
+      });
+  }
+  void insertPointClockwise(std::vector<PointF>& points, Eigen::Vector4f  centroid, const PointF newPoint) {
+      auto it = std::lower_bound(points.begin(), points.end(), newPoint, [&centroid, this](const PointF a, const PointF b) {
+          return comparePoints(centroid, a, b);
+      });
+      points.insert(it, newPoint);
+  }
+  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
   void getOccupiedLimits();
   void initializeOccupancyMap();
-  void getAllVoxelCenters(std::vector<Eigen::Vector3f>& voxelCenters);
 
-  /// updates the downprojected 2D map as either occupied or free
-  // void update2DMap(const Octree::LeafNodeIterator& it, bool occupied);
-
-  inline unsigned mapIdx(int i, int j) const {
-    return m_gridmap.info.width * j + i;
-  }
-
-  ros::NodeHandle m_nh;
-  ros::NodeHandle m_nh_private;
+  ros::NodeHandle nodehandle;
+  ros::NodeHandle nodehandle_private;
   ros::Publisher  m_mapPub;
 
   Octree::Ptr m_octree;
-  pcl::octree::OctreeKey m_updateBBXMin;
-  pcl::octree::OctreeKey m_updateBBXMax;
-  pcl::octree::OctreeKey m_paddedMinKey;
-  pcl::octree::OctreeKey m_paddedMaxKey;
-  pcl::PointXYZINormal minPt,maxPt;  
-  pcl::PointXYZINormal min_occupied,max_occupied;
-  pcl::PointCloud<pcl::PointXYZINormal>::Ptr Cloud;
-  std::vector<pcl::PointXYZINormal, Eigen::aligned_allocator<pcl::PointXYZINormal>> voxelCenters;
+  PointF minPt,maxPt;  
+  PointF min_occupied,max_occupied;
+  pcl::PointCloud<PointF>::Ptr Cloud;
 
-  pcl::PointCloud<pcl::PointXYZINormal>::Ptr filteredVoxelCloud,convexCloud,downsampledCloud;
+  pcl::PointCloud<PointF>::Ptr filteredVoxelCloud,convexCloud,downsampledCloud;
   pcl::PointXYZ voxelpoints;
-  pcl::ConcaveHull<pcl::PointXYZINormal> chull;
-  pcl::VoxelGrid<pcl::PointXYZINormal> sor;
-  pcl::PassThrough<pcl::PointXYZINormal> pass;
-
-  
-  
-
-  std::string m_baseFrameId; // base of the robot for ground plane filtering
+  pcl::ConcaveHull<PointF> chull;
+  pcl::VoxelGrid<PointF> sor;
+  pcl::PassThrough<PointF> pass;
 
   double m_res;
-  unsigned m_treeDepth;
-  unsigned m_maxTreeDepth;
 
   double m_occupancyMinZ;
   double m_occupancyMaxZ;
-  double m_minSizeX;
-  double m_minSizeY;
 
   // downprojected 2D map:
-  bool m_incrementalUpdate;
   bool initial_check=true;  
 
-  nav_msgs::OccupancyGrid m_gridmap;
+  nav_msgs::OccupancyGrid occupancy_map;
   nav_msgs::MapMetaData oldMapInfo;
   
   unsigned m_multires2DScale;

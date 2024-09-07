@@ -16,7 +16,7 @@
 #include <pcl/octree/octree_search.h>
 #include <geometry_utils/Transform3.h>
 #include <geometry_utils/GeometryUtilsROS.h>
-#include <point_cloud_mapper/OctomapServer.h>
+#include <point_cloud_mapper/OccupancyMapServer.h>
 
 
 class PointCloudMultiThreadedMapper : public IPointCloudMapper
@@ -137,6 +137,6 @@ private:
   bool b_inserted_points_;
   ros::Timer refresh_timer_;
   void RefreshTimerCallback(const ros::TimerEvent& ev);
-  OctomapServer* occupancy_map_server=nullptr;
-  OctomapServer* occupancy_map_server_b=nullptr;
+  OccupancyMapServer* occupancy_map_server=nullptr;
+  OccupancyMapServer* occupancy_map_server_b=nullptr;
 };

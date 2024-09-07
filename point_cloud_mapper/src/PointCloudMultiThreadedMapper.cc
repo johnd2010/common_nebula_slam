@@ -1,4 +1,4 @@
-#include "point_cloud_mapper/OctomapServer.h"
+#include "point_cloud_mapper/OccupancyMapServer.h"
 #include "ros/console.h"
 #include <omp.h>
 #include <std_msgs/String.h>
@@ -64,8 +64,8 @@ bool PointCloudMultiThreadedMapper::LoadParameters(const ros::NodeHandle& n)
   map_octree_b_.reset(new Octree(octree_resolution_));
   map_octree_->setInputCloud(map_data_);
   initialized_ = true;
-  occupancy_map_server = new OctomapServer(n,fixed_frame_id_);
-  occupancy_map_server_b = new OctomapServer(n,fixed_frame_id_);
+  occupancy_map_server = new OccupancyMapServer(n,fixed_frame_id_);
+  occupancy_map_server_b = new OccupancyMapServer(n,fixed_frame_id_);
   return true;
 }
 
